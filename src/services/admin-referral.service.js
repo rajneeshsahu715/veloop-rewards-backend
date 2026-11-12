@@ -1,4 +1,4 @@
-﻿import mongoose from "mongoose";
+import mongoose from "mongoose";
 
 import Referral from "../models/Referral.js";
 import User from "../models/User.js";
@@ -163,7 +163,7 @@ export const getReferralById = async (referralId) => {
 
     ActivityLog.find({
       userId: { $in: participantIds },
-      activityType: "REFERRAL_REWARD",
+      activityType: { $in: ["XP_CREDIT", "REFERRAL_REWARD"] },
       referenceId: referralReferenceId,
     })
       .sort({ createdAt: -1 })

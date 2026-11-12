@@ -1,14 +1,28 @@
+
 import User from "../models/User.js";
+
 import {
     uploadProfileImageToCloudinary,
     deleteProfileImageFromCloudinary,
 } from "./cloudinary-image.service.js";
+
 import { evaluateAchievements } from "./achievement-progress.service.js";
+import { completeReferralForUser } from "./referral-completion.service.js";
 
 const createProfileError = (message, statusCode = 400) => {
     const error = new Error(message);
     error.statusCode = statusCode;
     return error;
+};
+
+const isProfileComplete = (user) => {
+    const completedFields = [
+        Boolean(user.name?.trim()),
+        Boolean(user.email?.trim()),
+        Boolean(user.profileImage?.trim()),
+    ];
+
+    return completedFields.every(Boolean);
 };
 
 export const updateUserProfile = async (
@@ -139,6 +153,27 @@ export const updateUserProfile = async (
         throw error;
     }
 
+    const isNowProfileComplete = isProfileComplete(user);
+
+    // Retry referral completion whenever the profile is complete.
+    if (isNowProfileComplete) {
+        try {
+            const referralResult = await completeReferralForUser(
+                user.userId
+            );
+
+            console.log(
+                "Referral completion result:",
+                referralResult.message
+            );
+        } catch (error) {
+            console.error(
+                "Referral completion failed:",
+                error.message
+            );
+        }
+    }
+
     try {
         await evaluateAchievements({
             userId: user.userId,
@@ -163,3 +198,5 @@ export const updateUserProfile = async (
         },
     };
 };
+
+export default updateUserProfile;

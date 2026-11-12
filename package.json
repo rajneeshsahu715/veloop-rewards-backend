@@ -23,6 +23,12 @@
     "multer": "^2.5.0"
   },
   "devDependencies": {
+    "minimatch": "^11.0.7",
     "nodemon": "^3.1.14"
+  },
+  "overrides": {
+    "nodemon": {
+      "minimatch": "^11.0.1"
+    }
   }
 }

@@ -1,3 +1,4 @@
+
 import mongoose from "mongoose";
 
 import XPTransaction from "../models/XPTransaction.js";
@@ -28,9 +29,10 @@ const XP_REWARD_RULES = {
   },
 };
 
-const getDuplicateResult = () => ({
+const getDuplicateResult = (amount) => ({
   awarded: false,
   duplicate: true,
+  amount,
   message: "XP reward has already been given for this event",
 });
 
@@ -48,7 +50,6 @@ const awardXPInTransaction = async ({
 }) => {
   const rewardRule = XP_REWARD_RULES[activityType];
 
-  // Check before creating to avoid unnecessary duplicate-key errors.
   const existingTransaction = await XPTransaction.findOne({
     userId,
     activityType,
@@ -56,7 +57,7 @@ const awardXPInTransaction = async ({
   }).session(session);
 
   if (existingTransaction) {
-    return getDuplicateResult();
+    return getDuplicateResult(rewardRule.amount);
   }
 
   const userLevel = await UserLevel.findOne({
@@ -168,7 +169,6 @@ export const awardXP = async ({
 
   const normalizedReferenceId = referenceId.trim();
 
-  // Reuse the caller's transaction when supplied.
   if (externalSession) {
     if (!externalSession.inTransaction()) {
       throw new Error(
@@ -184,7 +184,6 @@ export const awardXP = async ({
     });
   }
 
-  // Otherwise, create and manage our own transaction.
   const session = await mongoose.startSession();
 
   try {
@@ -202,7 +201,9 @@ export const awardXP = async ({
     return result;
   } catch (error) {
     if (isDuplicateXPTransaction(error)) {
-      return getDuplicateResult();
+      return getDuplicateResult(
+        XP_REWARD_RULES[activityType].amount
+      );
     }
 
     throw error;
