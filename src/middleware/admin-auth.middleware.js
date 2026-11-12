@@ -1,4 +1,3 @@
-
 import jwt from "jsonwebtoken";
 import AdminUser from "../models/AdminUser.js";
 
@@ -13,7 +12,7 @@ export const authenticateAdmin = async (req, res, next) => {
       });
     }
 
-    const token = authHeader.split(" ")[1];
+    const token = authHeader.slice(7).trim();
 
     if (!token || !process.env.JWT_SECRET) {
       return res.status(401).json({
@@ -22,9 +21,16 @@ export const authenticateAdmin = async (req, res, next) => {
       });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET, {
+      issuer: "veloop-admin-auth",
+      audience: "veloop-admin",
+    });
 
-    if (!decoded.adminId || decoded.role !== "SUPER_ADMIN") {
+    if (
+      typeof decoded.adminId !== "string" ||
+      !decoded.adminId.trim() ||
+      decoded.role !== "SUPER_ADMIN"
+    ) {
       return res.status(403).json({
         success: false,
         message: "Admin access denied.",
@@ -49,7 +55,7 @@ export const authenticateAdmin = async (req, res, next) => {
       role: admin.role,
     };
 
-    next();
+    return next();
   } catch (error) {
     return res.status(401).json({
       success: false,

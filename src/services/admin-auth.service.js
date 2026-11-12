@@ -1,4 +1,3 @@
-
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import AdminUser from "../models/AdminUser.js";
@@ -53,7 +52,7 @@ export const loginAdmin = async (email, password) => {
   admin.lastLoginAt = new Date();
   await admin.save();
 
-  // Generate JWT
+  // Generate Admin JWT with issuer and audience restrictions
   const token = jwt.sign(
     {
       adminId: admin._id.toString(),
@@ -62,6 +61,8 @@ export const loginAdmin = async (email, password) => {
     process.env.JWT_SECRET,
     {
       expiresIn: process.env.ADMIN_JWT_EXPIRES_IN || "1h",
+      issuer: "veloop-admin-auth",
+      audience: "veloop-admin",
     }
   );
 
