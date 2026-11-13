@@ -41,7 +41,15 @@ app.use(
 
 // Request Parsing and Logging
 app.use(express.json({ limit: "10kb" }));
-app.use(express.urlencoded({ extended: true }));
+
+app.use(
+    express.urlencoded({
+        extended: true,
+        limit: "10kb",
+        parameterLimit: 100,
+    })
+);
+
 app.use(morgan("dev"));
 
 // Health Check
@@ -83,6 +91,10 @@ app.use((req, res) => {
 
 // Global Error Handler
 app.use((error, req, res, next) => {
+    if (res.headersSent) {
+        return next(error);
+    }
+
     console.error("Server Error:", error.message);
 
     let statusCode = 500;
@@ -98,6 +110,15 @@ app.use((error, req, res, next) => {
         } else {
             message = "Image upload failed";
         }
+    } else if (error.type === "parameters.too.many") {
+        statusCode = 413;
+        message = "Too many URL-encoded parameters. Maximum allowed is 100.";
+    } else if (error.type === "entity.too.large") {
+        statusCode = 413;
+        message = "Request body cannot exceed 10 KB";
+    } else if (error.type === "entity.parse.failed") {
+        statusCode = 400;
+        message = "Invalid request body";
     } else if (
         error.message === "Only JPG, PNG and WEBP images are allowed"
     ) {

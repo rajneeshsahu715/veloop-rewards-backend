@@ -1,5 +1,5 @@
-
 import mongoose from "mongoose";
+
 import Achievement from "../models/Achievement.js";
 import AdminAuditLog from "../models/AdminAuditLog.js";
 
@@ -11,15 +11,117 @@ const ALLOWED_ACHIEVEMENT_FIELDS = [
   "isActive",
 ];
 
+const ALLOWED_CONDITION_TYPES = [
+  "FIRST_LOGIN",
+  "PROFILE_COMPLETION",
+  "TOTAL_XP",
+  "SUCCESSFUL_REFERRALS",
+];
+
+const ACHIEVEMENT_NAME_COLLATION = {
+  locale: "en",
+  strength: 2,
+};
+
+const createAchievementError = (message, statusCode = 400) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+};
+
+const normalizeDatabaseError = (error) => {
+  if (error?.code === 11000) {
+    return createAchievementError(
+      "Achievement name already exists",
+      409
+    );
+  }
+
+  if (error?.name === "ValidationError") {
+    return createAchievementError(
+      "Invalid achievement data",
+      400
+    );
+  }
+
+  if (error?.name === "CastError") {
+    return createAchievementError(
+      "Invalid achievement data",
+      400
+    );
+  }
+
+  return error;
+};
+
 const validateAdminId = (adminId) => {
   if (!mongoose.Types.ObjectId.isValid(adminId)) {
-    throw new Error("Invalid admin ID");
+    throw createAchievementError("Invalid admin ID");
+  }
+};
+
+const validateUnlockConditions = (conditions) => {
+  if (
+    !conditions ||
+    typeof conditions !== "object" ||
+    Array.isArray(conditions)
+  ) {
+    throw createAchievementError("Invalid unlock conditions");
+  }
+
+  const fields = Object.keys(conditions);
+
+  if (
+    fields.length !== 2 ||
+    !fields.includes("type") ||
+    !fields.includes("target")
+  ) {
+    throw createAchievementError(
+      "Unlock conditions must contain only type and target"
+    );
+  }
+
+  if (
+    typeof conditions.type !== "string" ||
+    !ALLOWED_CONDITION_TYPES.includes(conditions.type)
+  ) {
+    throw createAchievementError(
+      "Unsupported achievement condition type"
+    );
+  }
+
+  if (
+    typeof conditions.target !== "number" ||
+    !Number.isSafeInteger(conditions.target) ||
+    conditions.target <= 0
+  ) {
+    throw createAchievementError(
+      "Achievement target must be a positive integer"
+    );
+  }
+
+  if (
+    conditions.type === "FIRST_LOGIN" &&
+    conditions.target !== 1
+  ) {
+    throw createAchievementError(
+      "FIRST_LOGIN target must be exactly 1"
+    );
+  }
+
+  if (
+    conditions.type === "PROFILE_COMPLETION" &&
+    conditions.target !== 100
+  ) {
+    throw createAchievementError(
+      "PROFILE_COMPLETION target must be exactly 100"
+    );
   }
 };
 
 const validateAchievementData = (data, isUpdate = false) => {
   if (!data || typeof data !== "object" || Array.isArray(data)) {
-    throw new Error("Invalid achievement data");
+    throw createAchievementError("Invalid achievement data");
   }
 
   const fields = Object.keys(data);
@@ -29,7 +131,7 @@ const validateAchievementData = (data, isUpdate = false) => {
       (field) => !ALLOWED_ACHIEVEMENT_FIELDS.includes(field)
     )
   ) {
-    throw new Error("Unsupported achievement field");
+    throw createAchievementError("Unsupported achievement field");
   }
 
   if (!isUpdate) {
@@ -41,7 +143,7 @@ const validateAchievementData = (data, isUpdate = false) => {
 
     for (const field of requiredFields) {
       if (data[field] === undefined || data[field] === null) {
-        throw new Error(`${field} is required`);
+        throw createAchievementError(`${field} is required`);
       }
     }
   }
@@ -52,7 +154,7 @@ const validateAchievementData = (data, isUpdate = false) => {
       !data.achievementName.trim() ||
       data.achievementName.trim().length > 100
     ) {
-      throw new Error(
+      throw createAchievementError(
         "Achievement name must be between 1 and 100 characters"
       );
     }
@@ -64,21 +166,14 @@ const validateAchievementData = (data, isUpdate = false) => {
       !data.description.trim() ||
       data.description.trim().length > 500
     ) {
-      throw new Error(
+      throw createAchievementError(
         "Description must be between 1 and 500 characters"
       );
     }
   }
 
   if (data.unlockConditions !== undefined) {
-    if (
-      data.unlockConditions === null ||
-      typeof data.unlockConditions !== "object" ||
-      Array.isArray(data.unlockConditions) ||
-      Object.keys(data.unlockConditions).length === 0
-    ) {
-      throw new Error("Invalid unlock conditions");
-    }
+    validateUnlockConditions(data.unlockConditions);
   }
 
   if (
@@ -86,7 +181,7 @@ const validateAchievementData = (data, isUpdate = false) => {
     data.badgeReference !== null &&
     typeof data.badgeReference !== "string"
   ) {
-    throw new Error(
+    throw createAchievementError(
       "Badge reference must be a string or null"
     );
   }
@@ -95,7 +190,7 @@ const validateAchievementData = (data, isUpdate = false) => {
     data.isActive !== undefined &&
     typeof data.isActive !== "boolean"
   ) {
-    throw new Error("isActive must be a boolean");
+    throw createAchievementError("isActive must be a boolean");
   }
 };
 
@@ -115,7 +210,7 @@ const getAllAchievements = async ({
 
 const getAchievementById = async (achievementId) => {
   if (!mongoose.Types.ObjectId.isValid(achievementId)) {
-    throw new Error("Invalid achievement ID");
+    throw createAchievementError("Invalid achievement ID");
   }
 
   const achievement = await Achievement.findById(
@@ -123,7 +218,7 @@ const getAchievementById = async (achievementId) => {
   ).lean();
 
   if (!achievement) {
-    throw new Error("Achievement not found");
+    throw createAchievementError("Achievement not found", 404);
   }
 
   return achievement;
@@ -144,20 +239,17 @@ const createAchievement = async ({
     await session.withTransaction(async () => {
       const achievementName = data.achievementName.trim();
 
-      const escapedName = achievementName.replace(
-        /[.*+?^${}()|[\]\\]/g,
-        "\\$&"
-      );
-
       const existingAchievement = await Achievement.findOne({
-        achievementName: {
-          $regex: `^${escapedName}$`,
-          $options: "i",
-        },
-      }).session(session);
+        achievementName,
+      })
+        .collation(ACHIEVEMENT_NAME_COLLATION)
+        .session(session);
 
       if (existingAchievement) {
-        throw new Error("Achievement name already exists");
+        throw createAchievementError(
+          "Achievement name already exists",
+          409
+        );
       }
 
       const [achievement] = await Achievement.create(
@@ -197,6 +289,8 @@ const createAchievement = async ({
     });
 
     return createdAchievement;
+  } catch (error) {
+    throw normalizeDatabaseError(error);
   } finally {
     await session.endSession();
   }
@@ -211,13 +305,15 @@ const updateAchievement = async ({
   validateAdminId(adminId);
 
   if (!mongoose.Types.ObjectId.isValid(achievementId)) {
-    throw new Error("Invalid achievement ID");
+    throw createAchievementError("Invalid achievement ID");
   }
 
   validateAchievementData(data, true);
 
   if (Object.keys(data).length === 0) {
-    throw new Error("At least one field is required for update");
+    throw createAchievementError(
+      "At least one field is required for update"
+    );
   }
 
   const session = await mongoose.startSession();
@@ -230,7 +326,10 @@ const updateAchievement = async ({
       ).session(session);
 
       if (!achievement) {
-        throw new Error("Achievement not found");
+        throw createAchievementError(
+          "Achievement not found",
+          404
+        );
       }
 
       const previousValues = {};
@@ -241,21 +340,18 @@ const updateAchievement = async ({
         if (key === "achievementName") {
           const normalizedName = value.trim();
 
-          const escapedName = normalizedName.replace(
-            /[.*+?^${}()|[\]\\]/g,
-            "\\$&"
-          );
-
           const duplicate = await Achievement.findOne({
-            achievementName: {
-              $regex: `^${escapedName}$`,
-              $options: "i",
-            },
+            achievementName: normalizedName,
             _id: { $ne: achievementId },
-          }).session(session);
+          })
+            .collation(ACHIEVEMENT_NAME_COLLATION)
+            .session(session);
 
           if (duplicate) {
-            throw new Error("Achievement name already exists");
+            throw createAchievementError(
+              "Achievement name already exists",
+              409
+            );
           }
 
           achievement[key] = normalizedName;
@@ -297,6 +393,8 @@ const updateAchievement = async ({
     });
 
     return updatedAchievement;
+  } catch (error) {
+    throw normalizeDatabaseError(error);
   } finally {
     await session.endSession();
   }

@@ -49,40 +49,69 @@ const DEFAULT_ACHIEVEMENTS = [
   },
 ];
 
+const CASE_INSENSITIVE_COLLATION = {
+  locale: "en",
+  strength: 2,
+};
+
+const findExistingAchievement = async (achievementName) => {
+  return Achievement.findOne({
+    achievementName,
+  }).collation(CASE_INSENSITIVE_COLLATION);
+};
+
 const seedAchievements = async () => {
+  let created = 0;
+  let skipped = 0;
+
   try {
     await connectDB();
 
-    let created = 0;
-    let skipped = 0;
-
     for (const data of DEFAULT_ACHIEVEMENTS) {
-      const existing = await Achievement.findOne({
-        achievementName: data.achievementName,
-      });
+      const existing = await findExistingAchievement(
+        data.achievementName
+      );
 
       if (existing) {
         skipped++;
+        console.log(`SKIPPED: ${data.achievementName} already exists.`);
         continue;
       }
 
-      await Achievement.create({
-        ...data,
-        isActive: true,
-        badgeReference: null,
-      });
+      try {
+        await Achievement.create({
+          ...data,
+          isActive: true,
+          badgeReference: null,
+        });
 
-      created++;
+        created++;
+        console.log(`CREATED: ${data.achievementName}`);
+      } catch (error) {
+        if (error.code === 11000) {
+          const duplicate = await findExistingAchievement(
+            data.achievementName
+          );
+
+          if (duplicate) {
+            skipped++;
+            console.log(
+              `SKIPPED: ${data.achievementName} was created by another process.`
+            );
+            continue;
+          }
+        }
+
+        throw error;
+      }
     }
 
     const total = await Achievement.countDocuments();
 
-    console.log({
-      created,
-      skipped,
-      totalAchievements: total,
-    });
-
+    console.log("\n========== ACHIEVEMENT SEED SUMMARY ==========");
+    console.log(`Created: ${created}`);
+    console.log(`Skipped: ${skipped}`);
+    console.log(`Total achievements: ${total}`);
     console.log("Achievement seeding completed successfully.");
   } catch (error) {
     console.error("Achievement seeding failed:", error.message);

@@ -1,10 +1,27 @@
-import { loginAdmin } from "../services/admin-auth.service.js";
+import {
+  loginAdmin,
+  logoutAdmin,
+} from "../services/admin-auth.service.js";
 
 export const adminLogin = async (req, res, next) => {
   try {
-    const { email, password } = req.body;
+    const body = req.body;
 
-    const result = await loginAdmin(email, password);
+    if (
+      !body ||
+      typeof body !== "object" ||
+      Array.isArray(body)
+    ) {
+      const error = new Error("Invalid login request body");
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const result = await loginAdmin(
+      body.email,
+      body.password,
+      req.ip
+    );
 
     return res.status(200).json({
       success: true,
@@ -12,11 +29,10 @@ export const adminLogin = async (req, res, next) => {
       data: result,
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
-// Get authenticated admin profile
 export const getAdminProfile = async (req, res) => {
   return res.status(200).json({
     success: true,
@@ -25,4 +41,21 @@ export const getAdminProfile = async (req, res) => {
       admin: req.admin,
     },
   });
+};
+
+// Logout authenticated admin and revoke existing tokens.
+export const adminLogout = async (req, res, next) => {
+  try {
+    await logoutAdmin(
+      req.admin.adminId,
+      req.ip
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Admin logout successful",
+    });
+  } catch (error) {
+    return next(error);
+  }
 };

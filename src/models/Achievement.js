@@ -1,4 +1,3 @@
-
 import mongoose from "mongoose";
 
 const achievementSchema = new mongoose.Schema(
@@ -39,7 +38,23 @@ const achievementSchema = new mongoose.Schema(
   }
 );
 
+// Existing case-sensitive index preserved.
 achievementSchema.index({ achievementName: 1 });
+
+// Database-level case-insensitive unique index.
+achievementSchema.index(
+  { achievementName: 1 },
+  {
+    unique: true,
+    name: "achievementName_ci_unique",
+    collation: {
+      locale: "en",
+      strength: 2,
+    },
+  }
+);
+
+// Existing active-status index preserved.
 achievementSchema.index({ isActive: 1 });
 
 const Achievement = mongoose.model(

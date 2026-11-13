@@ -1,4 +1,3 @@
-
 import mongoose from "mongoose";
 
 const adminUserSchema = new mongoose.Schema(
@@ -40,6 +39,14 @@ const adminUserSchema = new mongoose.Schema(
     lastLoginAt: {
       type: Date,
       default: null,
+    },
+
+    // Incremented during logout to invalidate existing JWTs.
+    tokenVersion: {
+      type: Number,
+      default: 0,
+      min: 0,
+      required: true,
     },
   },
   {
