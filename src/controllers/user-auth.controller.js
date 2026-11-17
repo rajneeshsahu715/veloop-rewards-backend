@@ -1,7 +1,7 @@
-
 import {
   registerUser,
   loginUser,
+  logoutUser,
 } from "../services/user-auth.service.js";
 
 export const register = async (req, res, next) => {
@@ -14,7 +14,7 @@ export const register = async (req, res, next) => {
       data: result,
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
@@ -28,6 +28,22 @@ export const login = async (req, res, next) => {
       data: result,
     });
   } catch (error) {
-    next(error);
+    return next(error);
+  }
+};
+
+export const logout = async (req, res, next) => {
+  try {
+    await logoutUser(
+      req.auth.userId,
+      req.auth.tokenVersion
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "User logout successful",
+    });
+  } catch (error) {
+    return next(error);
   }
 };

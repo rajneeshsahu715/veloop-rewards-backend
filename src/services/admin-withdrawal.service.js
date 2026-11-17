@@ -1,3 +1,4 @@
+
 import mongoose from "mongoose";
 
 import Withdrawal from "../models/Withdrawal.js";
@@ -8,29 +9,126 @@ import ActivityLog from "../models/ActivityLog.js";
 
 const ALLOWED_ACTIONS = ["APPROVED", "REJECTED", "COMPLETED"];
 
-// Get withdrawal requests with pagination and optional status filter
+const ALLOWED_STATUSES = [
+  "PENDING",
+  "APPROVED",
+  "REJECTED",
+  "COMPLETED",
+];
+
+const MAX_PAGE = 10000;
+const MAX_LIMIT = 100;
+const MAX_REASON_LENGTH = 500;
+const MAX_IP_ADDRESS_LENGTH = 64;
+
+const createValidationError = (message, statusCode = 400) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+};
+
+const parsePaginationValue = (value, fallback, field, maximum) => {
+  if (value === undefined) {
+    return fallback;
+  }
+
+  if (
+    typeof value === "string" &&
+    !/^\d+$/.test(value.trim())
+  ) {
+    throw createValidationError(`Invalid ${field}`);
+  }
+
+  if (typeof value !== "string" && typeof value !== "number") {
+    throw createValidationError(`Invalid ${field}`);
+  }
+
+  const parsedValue = Number(value);
+
+  if (
+    !Number.isSafeInteger(parsedValue) ||
+    parsedValue < 1 ||
+    parsedValue > maximum
+  ) {
+    throw createValidationError(`Invalid ${field}`);
+  }
+
+  return parsedValue;
+};
+
+const validateReason = (reason, status) => {
+  if (reason === undefined || reason === null) {
+    if (status === "REJECTED") {
+      throw createValidationError("Rejection reason is required");
+    }
+
+    return null;
+  }
+
+  if (typeof reason !== "string") {
+    throw createValidationError("Invalid withdrawal reason");
+  }
+
+  const normalizedReason = reason.trim();
+
+  if (normalizedReason.length > MAX_REASON_LENGTH) {
+    throw createValidationError(
+      "Withdrawal reason cannot exceed 500 characters"
+    );
+  }
+
+  if (status === "REJECTED" && !normalizedReason) {
+    throw createValidationError("Rejection reason is required");
+  }
+
+  return normalizedReason || null;
+};
+
+const validateIpAddress = (ipAddress) => {
+  if (ipAddress === undefined || ipAddress === null) {
+    return null;
+  }
+
+  if (
+    typeof ipAddress !== "string" ||
+    ipAddress.trim().length > MAX_IP_ADDRESS_LENGTH
+  ) {
+    throw createValidationError("Invalid IP address");
+  }
+
+  return ipAddress.trim() || null;
+};
+
+// Get withdrawal requests with strict pagination and status filter
 export const getAllWithdrawals = async ({
   page = 1,
   limit = 10,
   status = "",
 } = {}) => {
-  const currentPage = Math.max(1, Number(page) || 1);
-  const perPage = Math.min(100, Math.max(1, Number(limit) || 10));
+  const currentPage = parsePaginationValue(
+    page,
+    1,
+    "page",
+    MAX_PAGE
+  );
+
+  const perPage = parsePaginationValue(
+    limit,
+    10,
+    "limit",
+    MAX_LIMIT
+  );
 
   const filter = {};
 
-  if (status) {
-    const allowedStatuses = [
-      "PENDING",
-      "APPROVED",
-      "REJECTED",
-      "COMPLETED",
-    ];
-
-    if (!allowedStatuses.includes(status)) {
-      const error = new Error("Invalid withdrawal status filter");
-      error.statusCode = 400;
-      throw error;
+  if (status !== "") {
+    if (
+      typeof status !== "string" ||
+      !ALLOWED_STATUSES.includes(status)
+    ) {
+      throw createValidationError(
+        "Invalid withdrawal status filter"
+      );
     }
 
     filter.status = status;
@@ -66,28 +164,27 @@ export const updateWithdrawalStatus = async ({
   ipAddress,
 }) => {
   if (!mongoose.isValidObjectId(withdrawalId)) {
-    const error = new Error("Valid withdrawal ID is required");
-    error.statusCode = 400;
-    throw error;
+    throw createValidationError(
+      "Valid withdrawal ID is required"
+    );
   }
 
-  if (!ALLOWED_ACTIONS.includes(status)) {
-    const error = new Error("Invalid withdrawal action");
-    error.statusCode = 400;
-    throw error;
+  if (
+    typeof status !== "string" ||
+    !ALLOWED_ACTIONS.includes(status)
+  ) {
+    throw createValidationError("Invalid withdrawal action");
   }
 
   if (!mongoose.isValidObjectId(adminId)) {
-    const error = new Error("Valid admin ID is required");
-    error.statusCode = 401;
-    throw error;
+    throw createValidationError(
+      "Valid admin ID is required",
+      401
+    );
   }
 
-  if (status === "REJECTED" && (!reason || !reason.trim())) {
-    const error = new Error("Rejection reason is required");
-    error.statusCode = 400;
-    throw error;
-  }
+  const normalizedReason = validateReason(reason, status);
+  const normalizedIpAddress = validateIpAddress(ipAddress);
 
   const session = await mongoose.startSession();
 
@@ -95,14 +192,15 @@ export const updateWithdrawalStatus = async ({
 
   try {
     await session.withTransaction(async () => {
-      const withdrawal = await Withdrawal.findById(withdrawalId).session(
-        session
-      );
+      const withdrawal = await Withdrawal.findById(
+        withdrawalId
+      ).session(session);
 
       if (!withdrawal) {
-        const error = new Error("Withdrawal request not found");
-        error.statusCode = 404;
-        throw error;
+        throw createValidationError(
+          "Withdrawal request not found",
+          404
+        );
       }
 
       const previousStatus = withdrawal.status;
@@ -110,14 +208,13 @@ export const updateWithdrawalStatus = async ({
       const validTransition =
         (previousStatus === "PENDING" &&
           ["APPROVED", "REJECTED"].includes(status)) ||
-        (previousStatus === "APPROVED" && status === "COMPLETED");
+        (previousStatus === "APPROVED" &&
+          status === "COMPLETED");
 
       if (!validTransition) {
-        const error = new Error(
+        throw createValidationError(
           `Cannot change withdrawal from ${previousStatus} to ${status}`
         );
-        error.statusCode = 400;
-        throw error;
       }
 
       const wallet = await Wallet.findOne({
@@ -126,15 +223,20 @@ export const updateWithdrawalStatus = async ({
       }).session(session);
 
       if (!wallet) {
-        const error = new Error("Associated wallet not found");
-        error.statusCode = 404;
-        throw error;
+        throw createValidationError(
+          "Associated wallet not found",
+          404
+        );
       }
 
-      if (wallet.reservedBalance < withdrawal.amount) {
-        const error = new Error("Insufficient reserved wallet balance");
-        error.statusCode = 409;
-        throw error;
+      if (
+        !Number.isFinite(wallet.reservedBalance) ||
+        wallet.reservedBalance < withdrawal.amount
+      ) {
+        throw createValidationError(
+          "Insufficient reserved wallet balance",
+          409
+        );
       }
 
       if (status === "REJECTED") {
@@ -160,8 +262,11 @@ export const updateWithdrawalStatus = async ({
           { session }
         );
 
-        withdrawal.walletTransactionIds.push(refundTransaction._id);
-        withdrawal.rejectionReason = reason.trim();
+        withdrawal.walletTransactionIds.push(
+          refundTransaction._id
+        );
+
+        withdrawal.rejectionReason = normalizedReason;
 
         await AdminAuditLog.create(
           [
@@ -174,13 +279,13 @@ export const updateWithdrawalStatus = async ({
                 userId: withdrawal.userId,
                 amount: withdrawal.amount,
                 currencyType: withdrawal.currencyType,
-                reason: reason.trim(),
+                reason: normalizedReason,
                 previousStatus,
                 newStatus: status,
                 previousAvailableBalance,
                 newAvailableBalance: wallet.availableBalance,
               },
-              ipAddress: ipAddress || null,
+              ipAddress: normalizedIpAddress,
             },
           ],
           { session }
@@ -202,7 +307,7 @@ export const updateWithdrawalStatus = async ({
                 previousStatus,
                 newStatus: status,
               },
-              ipAddress: ipAddress || null,
+              ipAddress: normalizedIpAddress,
             },
           ],
           { session }
@@ -211,6 +316,7 @@ export const updateWithdrawalStatus = async ({
 
       if (status === "COMPLETED") {
         wallet.reservedBalance -= withdrawal.amount;
+
         await wallet.save({ session });
 
         await ActivityLog.create(
@@ -241,8 +347,9 @@ export const updateWithdrawalStatus = async ({
                 currencyType: withdrawal.currencyType,
                 previousStatus,
                 newStatus: status,
+                reason: normalizedReason,
               },
-              ipAddress: ipAddress || null,
+              ipAddress: normalizedIpAddress,
             },
           ],
           { session }
@@ -253,8 +360,8 @@ export const updateWithdrawalStatus = async ({
 
       withdrawal.statusHistory.push({
         status,
-        changedBy: adminId,
-        reason: reason?.trim() || null,
+        changedBy: String(adminId),
+        reason: normalizedReason,
       });
 
       await withdrawal.save({ session });

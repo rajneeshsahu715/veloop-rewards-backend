@@ -1,4 +1,3 @@
-
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
 
@@ -32,9 +31,9 @@ export const authenticateUser = async (req, res, next) => {
 
   let decoded;
 
-  // Step 1: Verify JWT
   try {
     decoded = jwt.verify(token, userJwtSecret, {
+      algorithms: ["HS256"],
       issuer: "veloop-user-auth",
       audience: "veloop-user",
     });
@@ -48,11 +47,13 @@ export const authenticateUser = async (req, res, next) => {
     });
   }
 
-  // Step 2: Validate token payload
   if (
+    !decoded ||
     typeof decoded.userId !== "string" ||
     !decoded.userId.trim() ||
-    decoded.role !== "USER"
+    decoded.role !== "USER" ||
+    !Number.isInteger(decoded.tokenVersion) ||
+    decoded.tokenVersion < 0
   ) {
     return res.status(401).json({
       success: false,
@@ -60,11 +61,10 @@ export const authenticateUser = async (req, res, next) => {
     });
   }
 
-  // Step 3: Verify user from database
   try {
     const user = await User.findOne({
       userId: decoded.userId,
-    }).select("userId accountStatus");
+    }).select("userId accountStatus tokenVersion");
 
     if (!user) {
       return res.status(401).json({
@@ -80,14 +80,24 @@ export const authenticateUser = async (req, res, next) => {
       });
     }
 
-    // Step 4: Attach authenticated user
+    const currentTokenVersion = Number.isInteger(user.tokenVersion)
+      ? user.tokenVersion
+      : 0;
+
+    if (decoded.tokenVersion !== currentTokenVersion) {
+      return res.status(401).json({
+        success: false,
+        message: "Your session is no longer valid. Please log in again.",
+      });
+    }
+
     req.auth = {
       userId: user.userId,
       role: "USER",
+      tokenVersion: currentTokenVersion,
     };
 
     return next();
-
   } catch (error) {
     return next(error);
   }

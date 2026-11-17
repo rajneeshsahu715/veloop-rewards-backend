@@ -17,3 +17,13 @@ large-profile-test.jpg
 
 # Local backup files
 *.backup.js
+
+# Local-only password reset utilities
+src/utils/reset-user-password.js
+src/utils/reset-veloop-status-test-password.js
+
+# Local backup files - do not commit
+*.backup
+*-backup
+
+src/utils/reset-admin-password.js

@@ -1,7 +1,41 @@
-import User from "../models/User.js";
+﻿import User from "../models/User.js";
 
-const escapeRegex = (value) => {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const MAX_PAGE = 10000;
+const MAX_LIMIT = 100;
+
+const createError = (message, statusCode = 400) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+};
+
+const parsePaginationValue = (value, fallback, field, max) => {
+  if (value === undefined) {
+    return fallback;
+  }
+
+  const normalizedValue =
+    typeof value === "string" ? value.trim() : value;
+
+  if (
+    normalizedValue === "" ||
+    typeof normalizedValue === "boolean" ||
+    !/^\d+$/.test(String(normalizedValue))
+  ) {
+    throw createError(`Invalid ${field}`);
+  }
+
+  const parsedValue = Number(normalizedValue);
+
+  if (
+    !Number.isSafeInteger(parsedValue) ||
+    parsedValue < 1 ||
+    parsedValue > max
+  ) {
+    throw createError(`Invalid ${field}`);
+  }
+
+  return parsedValue;
 };
 
 export const getAllUsers = async ({
@@ -10,39 +44,64 @@ export const getAllUsers = async ({
   search = "",
   status = "",
 } = {}) => {
-  const currentPage = Math.max(1, Number(page) || 1);
-
-  const perPage = Math.min(
-    100,
-    Math.max(1, Number(limit) || 10)
+  const currentPage = parsePaginationValue(
+    page,
+    1,
+    "page",
+    MAX_PAGE
   );
+
+  const perPage = parsePaginationValue(
+    limit,
+    10,
+    "limit",
+    MAX_LIMIT
+  );
+
+  if (typeof search !== "string") {
+    throw createError("Invalid search value");
+  }
+
+  if (search.length > 100) {
+    throw createError("Search value cannot exceed 100 characters");
+  }
+
+  if (typeof status !== "string") {
+    throw createError("Invalid account status");
+  }
+
+  const normalizedSearch = search.trim();
+  const normalizedStatus = status.trim().toUpperCase();
 
   const filter = {};
 
-  if (search.trim()) {
-    const safeSearch = escapeRegex(search.trim());
+  if (normalizedSearch) {
+    const escapedSearch = normalizedSearch.replace(
+      /[.*+?^${}()|[\]\\]/g,
+      "\\$&"
+    );
+
+    const searchRegex = new RegExp(escapedSearch, "i");
 
     filter.$or = [
-      { name: { $regex: safeSearch, $options: "i" } },
-      { email: { $regex: safeSearch, $options: "i" } },
-      { referralCode: { $regex: safeSearch, $options: "i" } },
+      { name: searchRegex },
+      { email: searchRegex },
+      { referralCode: searchRegex },
     ];
   }
 
-  if (status) {
+  if (normalizedStatus) {
     const allowedStatuses = [
       "ACTIVE",
       "SUSPENDED",
       "DEACTIVATED",
     ];
 
-    if (!allowedStatuses.includes(status.toUpperCase())) {
-      const error = new Error("Invalid account status");
-      error.statusCode = 400;
-      throw error;
+    if (!allowedStatuses.includes(normalizedStatus)) {
+      throw createError("Invalid account status");
     }
 
-    filter.accountStatus = status.toUpperCase();
+    filter.accountStatus = normalizedStatus;
   }
 
   const skip = (currentPage - 1) * perPage;

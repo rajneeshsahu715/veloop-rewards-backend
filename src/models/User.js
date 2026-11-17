@@ -57,6 +57,13 @@ const userSchema = new mongoose.Schema(
       default: "ACTIVE",
     },
 
+    tokenVersion: {
+      type: Number,
+      default: 0,
+      min: 0,
+      required: true,
+    },
+
     emailVerified: {
       type: Boolean,
       default: undefined,

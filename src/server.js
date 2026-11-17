@@ -1,8 +1,10 @@
+
 import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
+import { rateLimit } from "express-rate-limit";
 
 import connectDB from "./config/db.js";
 
@@ -38,6 +40,21 @@ app.use(
         credentials: true,
     })
 );
+
+// General API Rate Limiter
+const globalApiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 100,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+        success: false,
+        message: "Too many API requests. Please try again later.",
+    },
+});
+
+// Apply general rate limiting only to API routes
+app.use("/api", globalApiLimiter);
 
 // Request Parsing and Logging
 app.use(express.json({ limit: "10kb" }));

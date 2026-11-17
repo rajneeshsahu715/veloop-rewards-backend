@@ -1,4 +1,4 @@
-import mongoose from "mongoose";
+﻿import mongoose from "mongoose";
 
 import Referral from "../models/Referral.js";
 import User from "../models/User.js";
@@ -12,10 +12,42 @@ const ALLOWED_STATUSES = [
   "CANCELLED",
 ];
 
+const MAX_PAGE = 10000;
+const MAX_LIMIT = 100;
+
 const createReferralError = (message, statusCode = 400) => {
   const error = new Error(message);
   error.statusCode = statusCode;
   return error;
+};
+
+const parsePaginationValue = (value, fallback, field, max) => {
+  if (value === undefined) {
+    return fallback;
+  }
+
+  const normalizedValue =
+    typeof value === "string" ? value.trim() : value;
+
+  if (
+    normalizedValue === "" ||
+    typeof normalizedValue === "boolean" ||
+    !/^\d+$/.test(String(normalizedValue))
+  ) {
+    throw createReferralError(`Invalid ${field}`);
+  }
+
+  const parsedValue = Number(normalizedValue);
+
+  if (
+    !Number.isSafeInteger(parsedValue) ||
+    parsedValue < 1 ||
+    parsedValue > max
+  ) {
+    throw createReferralError(`Invalid ${field}`);
+  }
+
+  return parsedValue;
 };
 
 const getSafeUserMap = async (userIds) => {
@@ -55,21 +87,33 @@ export const getAllReferrals = async ({
   status = "",
   search = "",
 } = {}) => {
-  const currentPage = Math.max(
+  const currentPage = parsePaginationValue(
+    page,
     1,
-    Number.parseInt(page, 10) || 1
+    "page",
+    MAX_PAGE
   );
 
-  const perPage = Math.min(
-    100,
-    Math.max(1, Number.parseInt(limit, 10) || 10)
+  const perPage = parsePaginationValue(
+    limit,
+    10,
+    "limit",
+    MAX_LIMIT
   );
+
+  if (typeof status !== "string") {
+    throw createReferralError("Invalid referral status filter");
+  }
+
+  if (typeof search !== "string") {
+    throw createReferralError("Invalid search query");
+  }
 
   const filter = {};
 
-  if (status) {
-    const normalizedStatus = String(status).trim().toUpperCase();
+  const normalizedStatus = status.trim().toUpperCase();
 
+  if (normalizedStatus) {
     if (!ALLOWED_STATUSES.includes(normalizedStatus)) {
       throw createReferralError("Invalid referral status filter");
     }
@@ -77,13 +121,13 @@ export const getAllReferrals = async ({
     filter.status = normalizedStatus;
   }
 
-  if (search) {
-    const searchValue = String(search).trim();
+  const searchValue = search.trim();
 
-    if (searchValue.length > 100) {
-      throw createReferralError("Search query is too long");
-    }
+  if (searchValue.length > 100) {
+    throw createReferralError("Search query is too long");
+  }
 
+  if (searchValue) {
     const escapedSearch = searchValue.replace(
       /[.*+?^${}()|[\]\\]/g,
       "\\$&"

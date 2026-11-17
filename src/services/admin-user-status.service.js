@@ -1,4 +1,4 @@
-
+﻿
 import mongoose from "mongoose";
 
 import User from "../models/User.js";
@@ -10,6 +10,55 @@ const ALLOWED_STATUSES = [
   "DEACTIVATED",
 ];
 
+const MAX_REASON_LENGTH = 500;
+const MAX_IP_ADDRESS_LENGTH = 64;
+const MAX_USER_ID_LENGTH = 100;
+
+const createValidationError = (message, statusCode = 400) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+};
+
+const validateReason = (reason) => {
+  if (typeof reason !== "string") {
+    throw createValidationError(
+      "Reason for status change is required"
+    );
+  }
+
+  const normalizedReason = reason.trim();
+
+  if (!normalizedReason) {
+    throw createValidationError(
+      "Reason for status change is required"
+    );
+  }
+
+  if (normalizedReason.length > MAX_REASON_LENGTH) {
+    throw createValidationError(
+      "Reason cannot exceed 500 characters"
+    );
+  }
+
+  return normalizedReason;
+};
+
+const validateIpAddress = (ipAddress) => {
+  if (ipAddress === undefined || ipAddress === null) {
+    return null;
+  }
+
+  if (
+    typeof ipAddress !== "string" ||
+    ipAddress.trim().length > MAX_IP_ADDRESS_LENGTH
+  ) {
+    throw createValidationError("Invalid IP address");
+  }
+
+  return ipAddress.trim() || null;
+};
+
 export const updateUserStatus = async ({
   userId,
   status,
@@ -17,29 +66,30 @@ export const updateUserStatus = async ({
   adminId,
   ipAddress,
 }) => {
-  if (!userId || typeof userId !== "string") {
-    const error = new Error("Valid user ID is required");
-    error.statusCode = 400;
-    throw error;
+  if (
+    typeof userId !== "string" ||
+    !userId.trim() ||
+    userId.trim().length > MAX_USER_ID_LENGTH
+  ) {
+    throw createValidationError("Valid user ID is required");
   }
 
-  if (!ALLOWED_STATUSES.includes(status)) {
-    const error = new Error("Invalid account status");
-    error.statusCode = 400;
-    throw error;
+  if (
+    typeof status !== "string" ||
+    !ALLOWED_STATUSES.includes(status)
+  ) {
+    throw createValidationError("Invalid account status");
   }
 
-  if (!adminId || !mongoose.isValidObjectId(adminId)) {
-    const error = new Error("Valid admin ID is required");
-    error.statusCode = 401;
-    throw error;
+  if (!mongoose.isValidObjectId(adminId)) {
+    throw createValidationError(
+      "Valid admin ID is required",
+      401
+    );
   }
 
-  if (!reason || !reason.trim()) {
-    const error = new Error("Reason for status change is required");
-    error.statusCode = 400;
-    throw error;
-  }
+  const normalizedReason = validateReason(reason);
+  const normalizedIpAddress = validateIpAddress(ipAddress);
 
   const session = await mongoose.startSession();
 
@@ -47,25 +97,36 @@ export const updateUserStatus = async ({
 
   try {
     await session.withTransaction(async () => {
-      const user = await User.findOne({ userId }).session(session);
+      const user = await User.findOne({
+        userId: userId.trim(),
+      }).session(session);
 
       if (!user) {
-        const error = new Error("User not found");
-        error.statusCode = 404;
-        throw error;
+        throw createValidationError("User not found", 404);
       }
 
       if (user.accountStatus === status) {
-        const error = new Error(
+        throw createValidationError(
           `User account is already ${status}`
         );
-        error.statusCode = 400;
-        throw error;
       }
 
       const previousStatus = user.accountStatus;
 
+      // Invalidate all previously issued user JWTs.
+      if (
+        !Number.isSafeInteger(user.tokenVersion) ||
+        user.tokenVersion < 0
+      ) {
+        throw createValidationError(
+          "User token version is invalid",
+          500
+        );
+      }
+
       user.accountStatus = status;
+      user.tokenVersion += 1;
+
       await user.save({ session });
 
       const auditLog = new AdminAuditLog({
@@ -76,9 +137,10 @@ export const updateUserStatus = async ({
         details: {
           previousStatus,
           newStatus: status,
-          reason: reason.trim(),
+          reason: normalizedReason,
+          tokenVersionIncremented: true,
         },
-        ipAddress: ipAddress || null,
+        ipAddress: normalizedIpAddress,
       });
 
       await auditLog.save({ session });

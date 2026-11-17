@@ -47,6 +47,9 @@ const generateUserToken = (user) => {
     {
       userId: user.userId,
       role: "USER",
+      tokenVersion: Number.isInteger(user.tokenVersion)
+        ? user.tokenVersion
+        : 0,
     },
     process.env.USER_JWT_SECRET,
     {
@@ -339,5 +342,44 @@ export const loginUser = async ({
   return {
     user: getSafeUserData(user),
     token,
+  };
+};
+
+
+// Revoke all active user sessions during logout.
+export const logoutUser = async (userId, tokenVersion) => {
+  if (
+    typeof userId !== "string" ||
+    !userId.trim() ||
+    !Number.isInteger(tokenVersion) ||
+    tokenVersion < 0
+  ) {
+    throw createAuthError("Invalid user authentication", 401);
+  }
+
+  const updatedUser = await User.findOneAndUpdate(
+    {
+      userId,
+      accountStatus: "ACTIVE",
+      tokenVersion,
+    },
+    {
+      $inc: { tokenVersion: 1 },
+    },
+    {
+      new: true,
+      runValidators: true,
+    }
+  ).select("userId tokenVersion");
+
+  if (!updatedUser) {
+    throw createAuthError(
+      "User session is no longer valid. Please log in again.",
+      401
+    );
+  }
+
+  return {
+    loggedOut: true,
   };
 };

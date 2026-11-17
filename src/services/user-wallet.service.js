@@ -5,27 +5,61 @@ import WalletTransaction from "../models/WalletTransaction.js";
 const ALLOWED_CURRENCIES = ["VE", "SVE", "GEMS", "TOKENS"];
 const ALLOWED_TRANSACTION_TYPES = ["CREDIT", "DEBIT"];
 
+const MAX_PAGE = 10000;
+const MAX_LIMIT = 100;
+
 const createError = (message, statusCode = 400) => {
   const error = new Error(message);
   error.statusCode = statusCode;
   return error;
 };
 
-// Get all wallets belonging to the authenticated user
+const parsePaginationValue = (value, fieldName, min, max) => {
+  const isValidType =
+    typeof value === "string" || typeof value === "number";
+
+  if (!isValidType) {
+    throw createError(`Invalid ${fieldName}`);
+  }
+
+  const stringValue = String(value);
+
+  if (!/^\d+$/.test(stringValue)) {
+    throw createError(`Invalid ${fieldName}`);
+  }
+
+  const parsedValue = Number(stringValue);
+
+  if (
+    !Number.isSafeInteger(parsedValue) ||
+    parsedValue < min ||
+    parsedValue > max
+  ) {
+    throw createError(
+      fieldName === "page"
+        ? `Page must be between 1 and ${MAX_PAGE}`
+        : `Limit must be between 1 and ${MAX_LIMIT}`
+    );
+  }
+
+  return parsedValue;
+};
+
 export const getUserWallets = async (userId) => {
   if (!userId || typeof userId !== "string") {
     throw createError("Valid user ID is required");
   }
 
   const wallets = await Wallet.find({ userId })
-    .select("currencyType availableBalance reservedBalance createdAt updatedAt")
+    .select(
+      "currencyType availableBalance reservedBalance createdAt updatedAt"
+    )
     .sort({ currencyType: 1 })
     .lean();
 
   return wallets;
 };
 
-// Get paginated transaction history of the authenticated user
 export const getUserWalletTransactions = async ({
   userId,
   page = 1,
@@ -37,23 +71,19 @@ export const getUserWalletTransactions = async ({
     throw createError("Valid user ID is required");
   }
 
-  const parsedPage = Number(page);
-  const parsedLimit = Number(limit);
+  const parsedPage = parsePaginationValue(
+    page,
+    "page",
+    1,
+    MAX_PAGE
+  );
 
-  if (
-    !Number.isInteger(parsedPage) ||
-    parsedPage < 1
-  ) {
-    throw createError("Page must be a positive integer");
-  }
-
-  if (
-    !Number.isInteger(parsedLimit) ||
-    parsedLimit < 1 ||
-    parsedLimit > 100
-  ) {
-    throw createError("Limit must be between 1 and 100");
-  }
+  const parsedLimit = parsePaginationValue(
+    limit,
+    "limit",
+    1,
+    MAX_LIMIT
+  );
 
   const filter = { userId };
 
